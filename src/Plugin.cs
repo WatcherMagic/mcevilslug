@@ -6,7 +6,9 @@ using On.MoreSlugcats;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using RWCustom;
 using UnityEngine;
+using Random = System.Random;
 
 namespace SlugTemplate
 {
@@ -27,6 +29,18 @@ namespace SlugTemplate
         private int framesSlugToBackInput = 0;
 
         private const int PUP_CHUNK_GRAB = 0;
+        
+        private const float _CANT_SNIFF_SECONDS = 15f; //15 or 20
+        private float _sinceLastSniffSeconds = _CANT_SNIFF_SECONDS;
+        private const float _SNIFF_HOLD_SECONDS = 1f;
+        private float _sniffHeldSeconds = 0f;
+        private bool _setNotifySound = false;
+        private bool _sniffing = false;
+        private const float _SNIFF_DURATION = 3f;
+        private float _sniffedFor = 0f;
+        
+        private const float LEAVE_TRACKS_COUNTER = 10f;
+        private float leaveTracksTimer = 0f;
 
         private List<AbstractRoom> realizedShelters = new List<AbstractRoom>();
 
@@ -50,7 +64,7 @@ namespace SlugTemplate
             On.Player.ObjectEaten += AddFood;
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
-            //On.Player.Update += EvilClimb;
+            On.Player.MovementUpdate += EvilClimb;
             On.Player.Update += EvilPlayerUpdates;
 
             //slugnpc hooks
@@ -76,7 +90,7 @@ namespace SlugTemplate
             RainWorld self, ModManager.Mod[] newlyEnabledMods)
         {
             orig(self, newlyEnabledMods);
-            Register.RegisterValues();
+            EvilEnums.RegisterValues();
         }
 
         private void RainWorld_OnModsDisabled(On.RainWorld.orig_OnModsDisabled orig,
@@ -85,78 +99,19 @@ namespace SlugTemplate
             orig(self, newlyDisabledMods);
             foreach (ModManager.Mod mod in newlyDisabledMods)
                 if (mod.id == MOD_ID)
-                    Register.UnregisterValues();
+                    EvilEnums.UnregisterValues();
         }
 
         private void AbstractPhysicalObject_Realize(On.AbstractPhysicalObject.orig_Realize orig, AbstractPhysicalObject self)
         {
             orig(self);
-            if (self.type == Register.PupTrack)
+            if (self.type == EvilEnums.PupTrack)
             {
                 UnityEngine.Debug.Log("[evilslug] Realizing track " + self.ID);
 
                 self.realizedObject = new Pup_Track(self);
             }
         }
-
-        // private void SpawnPupOnShelterRealize(On.AbstractRoom.orig_RealizeRoom orig, AbstractRoom self, World world, RainWorldGame game)
-        // {
-        //     if (game.IsStorySession && game.StoryCharacter.value == MOD_ID)
-        //     {
-        //         if (ModManager.MSC
-        //             && self.realizedRoom == null
-        //             && !self.offScreenDen
-        //             && self.shelter
-        //             && !world.singleRoomWorld
-        //             && self.name != game.GetStorySession.saveState.denPosition)
-        //         {
-        //             Logger.LogInfo("Attempting to spawn SlugNPC in realized shelter...");
-        //             // bool hasBeenRealized = false;
-        //
-        //             // if (realizedShelters.Any())
-        //             // {
-        //             //     foreach (AbstractRoom shelter in realizedShelters)
-        //             //     {
-        //             //         if (shelter.name == self.name)
-        //             //         {
-        //             //             hasBeenRealized = true;
-        //             //             Logger.LogInfo("Failed! This shelter has already been realized once");
-        //             //         }
-        //             //     }
-        //             // }
-        //
-        //             // if (!hasBeenRealized)
-        //             // {
-        //             float spawn = UnityEngine.Random.Range(0f, 10f);
-        //             if (spawn <= 1.7f)
-        //             {
-        //                 SpawnPup(game, world, self);
-        //             }
-        //             else
-        //             {
-        //                 Logger.LogInfo("Spawn failed due to random chance");
-        //             }
-        //             realizedShelters.Add(self);
-        //             //}
-        //         }
-        //     }
-        //
-        //     orig(self, world, game);
-        // }
-
-        // private void ClearList(On.World.orig_LoadWorld orig, World self, SlugcatStats.Name slugcatNumber, List<AbstractRoom> abstractRoomsList, int[] swarmRooms, int[] shelters, int[] gates)
-        // {
-        //     Logger.LogInfo("Clearing realized shelter list on world load");
-        //     if (realizedShelters.Any())
-        //     {
-        //         Logger.LogInfo("Shelters realized previously:\n" + String.Join(",\n", realizedShelters));
-        //         realizedShelters.Clear();
-        //     }
-        //     else
-        //     {
-        //         Logger.LogInfo("realizedShelters list was empty");
-        //     }
-        // }
 
         private void AddFood(On.Player.orig_ObjectEaten orig, Player self, IPlayerEdible edible)
         {
@@ -233,19 +188,25 @@ namespace SlugTemplate
             }
         }
 
-        // private void EvilClimb(On.Player.orig_Update orig, Player self, bool eu)
-        // {
-        //     orig(self, eu);
-
-        //     if (self.slugcatStats.name.value == MOD_ID
-        //         && self.input[0].AnyDirectionalInput
-        //         && self.input[0].jmp
-        //         && self.State.alive
-        //         && !self.Stunned)
-        //     {
-        //         TryToClimb(self);
-        //     }
-        // }
+        private void EvilClimb(On.Player.orig_MovementUpdate orig, Player self, bool eu)
+        {
+            orig(self, eu);
+            
+            // if (self.slugcatStats.name.value == MOD_ID && self.bodyMode == Player.BodyModeIndex.WallClimb)
+            // {
+            //     self.bodyChunks[1].vel.x = 0f;
+            //     self.bodyChunks[1].vel.y = 0f;
+            // }
+            
+            // if (self.slugcatStats.name.value == MOD_ID
+            //     && self.input[0].AnyDirectionalInput
+            //     && self.input[0].jmp
+            //     && self.State.alive
+            //     && !self.Stunned)
+            // {
+            //     TryToClimb(self);
+            // }
+        }
 
         // private void TryToClimb(Player self)
         // {
@@ -307,12 +268,17 @@ namespace SlugTemplate
         {
             orig(self, eu);
 
+            _sinceLastSniffSeconds += Time.deltaTime;
+
             LeaveTrack(self);
             Sniff(self);
-        }
 
-        private const float LEAVE_TRACKS_COUNTER = 10f;
-        private float leaveTracksTimer = 0f;
+            if (_sniffing)
+            {
+                SniffUpdate(self);
+            }
+        }
+        
         private void LeaveTrack(Player self)
         {
             //spawn track at player location
@@ -321,7 +287,7 @@ namespace SlugTemplate
             {
                 try
                 {
-                    AbstractPhysicalObject abstractTrack = new(self.room.world, Register.PupTrack, null,
+                    AbstractPhysicalObject abstractTrack = new(self.room.world, EvilEnums.PupTrack, null,
                     self.room.GetWorldCoordinate(self.bodyChunks[1].pos), self.room.game.GetNewID());
                     Pup_Track track = new Pup_Track(abstractTrack);
                     track.SetPupColor((self.graphicsModule as PlayerGraphics).player.ShortCutColor());
@@ -336,23 +302,30 @@ namespace SlugTemplate
             }
             leaveTracksTimer += Time.deltaTime;
         }
-
-        private const float _SNIFF_COUNTER = 15f; //15 or 20
-        private float _lastSniff = _SNIFF_COUNTER;
-        private bool _setNotifySound = false;
+        
         private void Sniff(Player self)
         {
             if (self.slugcatStats.name.value == MOD_ID)
             {
-                if (ModManager.Watcher && self.input[0].spec
-                    || !ModManager.Watcher && self.input[0].pckp && self.input[0].mp)
+                if ((ModManager.Watcher && self.input[0].spec)
+                    || (self.input[0].pckp && self.input[0].mp))
                 {
-                    if (_lastSniff >= _SNIFF_COUNTER)
+                    _sniffHeldSeconds += Time.deltaTime;
+                    
+                    if (_sinceLastSniffSeconds >= _CANT_SNIFF_SECONDS && _sniffHeldSeconds >= _SNIFF_HOLD_SECONDS)
                     {
                         Debug.Log("[McEvil] Sniffing");
+                        _sniffing = true;
+                        _sinceLastSniffSeconds = 0f;
                         _setNotifySound = true;
-                        SniffAnimation(self);
-                        _lastSniff = 0f;
+                        self.Blink(200);
+                        if (self.room != null)
+                        {
+                            self.room.PlayCustomChunkSound(nameof(EvilEnums.EvilSniff), 
+                                self.bodyChunks[0], 1f, UnityEngine.Random.Range(0.5f, 1f));
+                            //self.room.PlaySound(EvilEnums.EvilSniff);
+                        }
+                        
                         for (int i = 0; i < self.room.physicalObjects.Length; i++)
                         {
                             for (int j = 0; j < self.room.physicalObjects[i].Count; j++)
@@ -366,10 +339,15 @@ namespace SlugTemplate
                     }
                     else
                     {
-                        Debug.Log("[McEvil] Can't sniff yet!");
+                        //Debug.Log("[McEvil] Can't sniff yet!");
+                        //self.Blink(10);
                     }
                 }
-                if (_lastSniff >= _SNIFF_COUNTER && _setNotifySound)
+                else
+                {
+                    _sniffHeldSeconds = 0f;
+                }
+                if (_sinceLastSniffSeconds >= _CANT_SNIFF_SECONDS && _setNotifySound)
                 {
                     self.room.PlaySound(SoundID.Token_Collect);
                     _setNotifySound = false;
@@ -377,21 +355,31 @@ namespace SlugTemplate
             }
         }
 
-        private void SniffAnimation(Player self)
+        private void SniffUpdate(Player self)
         {
-            self.Blink(300);
+            _sniffedFor += Time.deltaTime;
+            if (_sniffedFor >= _SNIFF_DURATION)
+            {
+                _sniffing = false;
+            }
+            
+            if (self.graphicsModule != null)
+            {
+                GenericBodyPart head = (self.graphicsModule as PlayerGraphics).head;
+                head.vel += Custom.RNV() * (UnityEngine.Random.value * 5f);
+            }
         }
 
         // private void UpdatePupAIState(Player npc)
         // {
-        //     npc.AI.behaviorType = Register.BeingGrabbed;
+        //     npc.AI.behaviorType = EvilEnums.BeingGrabbed;
         // }
 
         private void PupUpdate(SlugNPCAI.orig_Update orig, MoreSlugcats.SlugNPCAI self)
         {
             orig(self);
 
-            if (self.behaviorType == Register.BeingGrabbed)
+            if (self.behaviorType == EvilEnums.BeingGrabbed)
             {
                 UnityEngine.Debug.Log("[evilslug] Pup is being grabbed");
             }

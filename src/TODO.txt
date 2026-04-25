@@ -1,1 +1,22 @@
-// Check if popcorn IL code works without Watcher installed
+ISSUES:
+- //
+
+TODO:
+- Sniff sound & anim
+- Pup track visuals
+- Generate paths of pup tracks at cycle start per pup in world
+- Evilslug visuals
+    - DMS integration?
+- Pups add karma when held
+- Wall & ceiling climbing logic
+- Spawn in FP chamber
+- Custom FP dialogue + behavior
+- Tutorial
+- Void ending
+- OE ending
+- Main menu art
+
+COMPATIBILITY:
+// Pup Karma: pups player has killed don't respawn no matter what karma level
+// Slugpup Safari: Double check if can't eat dead slug (piggybacks) is jolly coop thing or safari issue
+// Jolly Coop: Fix issue with piggybacking dead slug overriding eating

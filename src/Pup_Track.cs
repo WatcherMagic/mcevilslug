@@ -16,14 +16,13 @@ namespace mcevilslug
 
         private float _age = 0f;
         private float _secondsVisible = 0f;
-        private const float _SECONDS_BEFORE_DELETION = 5f; //240
+        private const float _SECONDS_BEFORE_DELETION = 240f; //240
         public const float _VISIBLE_FOR = 30f;
         private Color _pupColor;
-        private Color _lightColor;
+        private Color _lightColor = new Color(1f, 1f, 1f);
         private readonly Color _invisibleColor = new Color(0f, 0f, 0f);
-        private const float _LIGHT_RAD = 40f;
+        private const float _LIGHT_RAD = 35f;
         private bool _beingKilled = false;
-        private const float _MIN_BRIGHTNESS = 0.3f;
 
         public Pup_Track(AbstractPhysicalObject abstr) : base(abstr)
         {
@@ -51,28 +50,20 @@ namespace mcevilslug
 
             if (_light != null)
             {
-                //Debug.Log("[evilslug] light not null, " + base.abstractPhysicalObject.ID + " alpha: " + _light.Alpha);
-
-                //light.setAlpha = 1f; //100f / age * SECONDS_BEFORE_DELETION;
                 if (!_visible)
                 {
                     room.RemoveObject(_light);
                     _light = null;
-                    //Debug.Log("[evilslug] Destroyed light for " + base.abstractPhysicalObject.ID);
                 }
                 else
                 {
                     Flicker();
                     _light.setPos = firstChunk.pos;
-                    //Debug.Log("[evilslug] adjusting alpha for " + base.abstractPhysicalObject.ID);
-                    _light.setAlpha = 1f - (_MIN_BRIGHTNESS + (_age / _SECONDS_BEFORE_DELETION * _MIN_BRIGHTNESS));
-                    //Debug.Log("[evilslug] new " + base.abstractPhysicalObject.ID + " alpha: " + _light.Alpha);
+                    _light.setAlpha = 1f - _age / _SECONDS_BEFORE_DELETION * 100f;
                 }
             }
             else
             {
-                //Debug.Log("[evilslug] Adding light to " + base.abstractPhysicalObject.ID);
-
                 if (_pupColor.g < 0.2f && _pupColor.b < 0.2f && _pupColor.r < 0.2f)
                 {
                     _lightColor = _pupColor + new Color(0.3f - _pupColor.g, 0.3f - _pupColor.b, 0.3f - _pupColor.r);
@@ -142,18 +133,12 @@ namespace mcevilslug
         public void SetVisibleFalse()
         {
             _visible = false;
-            //Debug.Log("[evilslug] set track visibility to False");
         }
 
         public void SetVisibleTrue()
         {
             _visible = true;
-            //Debug.Log("[evilslug] set track visibility to True");
-        }
-
-        public bool Visibility()
-        {
-            return _visible;
+            _secondsVisible = 0f;
         }
 
         private void Kill()
@@ -204,40 +189,40 @@ namespace mcevilslug
 
         public void InitiateSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam)
         {
-            sLeaser.sprites = new FSprite[] { new FSprite("atlases/puptracks/pup_track") { scale = 1f } };
-            AddToContainer(sLeaser, rCam, null);
+            //sLeaser.sprites = new FSprite[] { new FSprite("atlases/puptracks/pup_track") { scale = 1f } };
+            //AddToContainer(sLeaser, rCam, null);
         }
 
         public void DrawSprites(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, float timeStacker, Vector2 camPos)
         {
-            if (slatedForDeletetion)
-            {
-                RemoveSpritesFromContainer(sLeaser);
-            }
+            // if (slatedForDeletetion)
+            // {
+            //     RemoveSpritesFromContainer(sLeaser);
+            // }
 
             Vector2 pos = Vector2.Lerp(firstChunk.lastPos, firstChunk.pos, timeStacker);
 
-            foreach (FSprite sprite in sLeaser.sprites)
-            {
-                sprite.x = pos.x - camPos.x;
-                sprite.y = pos.y - camPos.y;
-
-                if (!_visible && sprite._color != _invisibleColor)
-                {
-                    sprite._color = _invisibleColor;
-                }
-                else if (sprite._color == _invisibleColor)
-                {
-                    sprite._color = _pupColor;
-                }
-            }
+            // foreach (FSprite sprite in sLeaser.sprites)
+            // {
+            //     sprite.x = pos.x - camPos.x;
+            //     sprite.y = pos.y - camPos.y;
+            //
+            //     if (!_visible && sprite._color != _invisibleColor)
+            //     {
+            //         sprite._color = _invisibleColor;
+            //     }
+            //     else if (sprite._color == _invisibleColor)
+            //     {
+            //         sprite._color = _pupColor;
+            //     }
+            // }
 
             ApplyPalette(sLeaser, rCam, rCam.currentPalette);
         }
 
         public void ApplyPalette(RoomCamera.SpriteLeaser sLeaser, RoomCamera rCam, RoomPalette palette)
         {
-            sLeaser.sprites[0].color = _pupColor;
+            //sLeaser.sprites[0].color = _pupColor;
             //sLeaser.sprites[0]._alpha = 100f / age * SECONDS_BEFORE_DELETION;
         }
 
