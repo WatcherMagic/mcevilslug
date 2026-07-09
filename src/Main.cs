@@ -16,7 +16,7 @@ namespace SlugTemplate
     
     [BepInDependency("dynamicpupspawns", BepInDependency.DependencyFlags.HardDependency)]
 
-    class Plugin : BaseUnityPlugin
+    class Main : BaseUnityPlugin
     {   
         public const string MOD_ID = "mcevilslug";
 
@@ -36,7 +36,7 @@ namespace SlugTemplate
         private float _sniffHeldSeconds = 0f;
         private bool _setNotifySound = false;
         private bool _sniffing = false;
-        private const float _SNIFF_DURATION = 3f;
+        private const float _SNIFF_DURATION = 1.5f;
         private float _sniffedFor = 0f;
         
         private const float LEAVE_TRACKS_COUNTER = 10f;
@@ -50,8 +50,9 @@ namespace SlugTemplate
         {
             On.RainWorld.OnModsInit += Extras.WrapInit(LoadResources);
 
-            //register and unregister enums for pup tracks
-            On.RainWorld.OnModsEnabled += RainWorld_OnModsEnabled;
+            //register and unregister enums
+            //On.RainWorld.OnModsEnabled += RainWorld_OnModsEnabled;
+            EvilEnums.RegisterValues();
             On.RainWorld.OnModsDisabled += RainWorld_OnModsDisabled;
 
             On.AbstractPhysicalObject.Realize += AbstractPhysicalObject_Realize;
@@ -64,11 +65,13 @@ namespace SlugTemplate
             On.Player.ObjectEaten += AddFood;
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
-            On.Player.MovementUpdate += EvilClimb;
             On.Player.Update += EvilPlayerUpdates;
+            //On.Player.Jump += LogSoundErrors;
+            On.Player.MovementUpdate += EvilClimb;
+            On.Player.UpdateBodyMode += TryClimbing;
 
             //slugnpc hooks
-            SlugNPCAI.Update += PupUpdate;
+            //SlugNPCAI.Update += PupUpdate;
 
             try
             {
@@ -81,17 +84,80 @@ namespace SlugTemplate
             }
         }
 
+        private void EvilClimb(On.Player.orig_MovementUpdate orig, Player self, bool eu)
+        {
+            orig(self, eu);
+            
+            
+
+            if (self.bodyMode == Player.BodyModeIndex.WallClimb)
+            {
+                //exit climbing mode
+                if (self.input[0].jmp || (self.bodyChunks[0].contactPoint.x == 0 //suspended in air
+                                          && self.bodyChunks[1].contactPoint.x == 0
+                                          && self.bodyChunks[1].contactPoint.y == 0)
+                                      //on ground
+                                      || self.bodyChunks[0].contactPoint.y < 0)
+                {
+                    self.bodyMode = Player.BodyModeIndex.Default;
+                    return;
+                }
+                
+                //skid to stop when grabbing wall while falling
+                self.bodyChunks[0].vel.y = Mathf.Lerp(self.bodyChunks[0].vel.y, 0f, 0.1f);
+            }
+        }
+        
+        private void TryClimbing(On.Player.orig_UpdateBodyMode orig, Player self)
+        {
+            orig(self);
+            
+            //enter climb state
+            if (self.slugcatStats.name.value == MOD_ID
+                    && self.bodyMode != Player.BodyModeIndex.WallClimb
+                    && self.State.alive
+                    && !self.Stunned
+                    && self.bodyMode != Player.BodyModeIndex.CorridorClimb
+                    && self.bodyMode != Player.BodyModeIndex.Swimming
+                    && self.input[0].y > 0
+                //jump onto wall from ground
+                && (self.bodyChunks[0].ContactPoint.x != 0
+                        && self.input[0].jmp
+                    //grab wall midair
+                    || (self.bodyChunks[0].ContactPoint.x != 0
+                        || self.bodyChunks[1].ContactPoint.x != 0)
+                        && self.bodyChunks[0].contactPoint.y == 0)
+                        && self.bodyChunks[1].ContactPoint.y == 0)
+            {
+                self.bodyMode = Player.BodyModeIndex.WallClimb;
+                Debug.Log("[evilslug] changed bodymode to wallclimb!");
+            }
+        }
+
+        private void LogSoundErrors(On.Player.orig_Jump orig, Player self)
+        {
+            orig(self);
+            
+            SoundLoader loader = self.room.world.game.rainWorld.processManager.soundLoader;
+            string soundErrors = "Sound Loader Errors:";
+            foreach (string s in loader.errors)
+            {
+                soundErrors += "\n" + s;
+            }
+            Logger.LogInfo(soundErrors);
+        }
+
         private void LoadResources(RainWorld rainWorld)
         {
             Futile.atlasManager.LoadImage("atlases/puptracks/pup_track");
         }
 
-        private void RainWorld_OnModsEnabled(On.RainWorld.orig_OnModsEnabled orig,
-            RainWorld self, ModManager.Mod[] newlyEnabledMods)
-        {
-            orig(self, newlyEnabledMods);
-            EvilEnums.RegisterValues();
-        }
+        // private void RainWorld_OnModsEnabled(On.RainWorld.orig_OnModsEnabled orig,
+        //     RainWorld self, ModManager.Mod[] newlyEnabledMods)
+        // {
+        //     orig(self, newlyEnabledMods);
+        //     EvilEnums.RegisterValues();
+        // }
 
         private void RainWorld_OnModsDisabled(On.RainWorld.orig_OnModsDisabled orig,
             RainWorld self, ModManager.Mod[] newlyDisabledMods)
@@ -187,34 +253,6 @@ namespace SlugTemplate
                 spear.SetRandomSpin();
             }
         }
-
-        private void EvilClimb(On.Player.orig_MovementUpdate orig, Player self, bool eu)
-        {
-            orig(self, eu);
-            
-            // if (self.slugcatStats.name.value == MOD_ID && self.bodyMode == Player.BodyModeIndex.WallClimb)
-            // {
-            //     self.bodyChunks[1].vel.x = 0f;
-            //     self.bodyChunks[1].vel.y = 0f;
-            // }
-            
-            // if (self.slugcatStats.name.value == MOD_ID
-            //     && self.input[0].AnyDirectionalInput
-            //     && self.input[0].jmp
-            //     && self.State.alive
-            //     && !self.Stunned)
-            // {
-            //     TryToClimb(self);
-            // }
-        }
-
-        // private void TryToClimb(Player self)
-        // {
-        //     //WorldCoordinate currentPos = self.abstractCreature.pos;
-
-
-        //     //UnityEngine.Debug.Log("trying to climb");
-        // }
 
         private void NoPopcorn(ILContext il)
         {
@@ -318,12 +356,10 @@ namespace SlugTemplate
                         _sniffing = true;
                         _sinceLastSniffSeconds = 0f;
                         _setNotifySound = true;
-                        self.Blink(200);
+                        self.Blink(100);
                         if (self.room != null)
                         {
-                            self.room.PlayCustomChunkSound(nameof(EvilEnums.EvilSniff), 
-                                self.bodyChunks[0], 1f, UnityEngine.Random.Range(0.5f, 1f));
-                            //self.room.PlaySound(EvilEnums.EvilSniff);
+                            self.room.PlaySound(EvilEnums.EvilSniff);
                         }
                         
                         for (int i = 0; i < self.room.physicalObjects.Length; i++)
@@ -366,7 +402,7 @@ namespace SlugTemplate
             if (self.graphicsModule != null)
             {
                 GenericBodyPart head = (self.graphicsModule as PlayerGraphics).head;
-                head.vel += Custom.RNV() * (UnityEngine.Random.value * 5f);
+                head.vel += Custom.RNV() * (UnityEngine.Random.value * 1.5f);
             }
         }
 
@@ -375,14 +411,14 @@ namespace SlugTemplate
         //     npc.AI.behaviorType = EvilEnums.BeingGrabbed;
         // }
 
-        private void PupUpdate(SlugNPCAI.orig_Update orig, MoreSlugcats.SlugNPCAI self)
-        {
-            orig(self);
-
-            if (self.behaviorType == EvilEnums.BeingGrabbed)
-            {
-                UnityEngine.Debug.Log("[evilslug] Pup is being grabbed");
-            }
-        }
+        // private void PupUpdate(SlugNPCAI.orig_Update orig, MoreSlugcats.SlugNPCAI self)
+        // {
+        //     orig(self);
+        //
+        //     if (self.behaviorType == EvilEnums.BeingGrabbed)
+        //     {
+        //         UnityEngine.Debug.Log("[evilslug] Pup is being grabbed");
+        //     }
+        // }
     }
 }
