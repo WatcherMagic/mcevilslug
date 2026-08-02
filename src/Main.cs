@@ -37,7 +37,11 @@ namespace SlugTemplate
         private const float _SNIFF_DURATION = 1.5f;
         private float _sniffedFor = 0f;
 
-        private List<string> _roomsThatPupsEntered = new();
+        Dictionary<int, float> _pupRoomTimes = new();
+        private float _worldTime = 0f;
+        private int _maxVoidSpawn = 15;
+        private int _minVoidSpawn = 1;
+        private float _maxAge = 400f;
 
         public ConditionalWeakTable<Player, EvilSlugcatData> evilPupData = new ();
 
@@ -53,7 +57,8 @@ namespace SlugTemplate
             On.RainWorld.OnModsDisabled += RainWorld_OnModsDisabled;
 
             //world hooks
-            On.World.SpawnPupNPCs += ClearPupRoomsEnteredList;
+            On.World.SpawnPupNPCs += ClearPupTrackingValues;
+            On.RainWorldGame.Update += IncrementWorldTime;
 
             //player hooks
             On.Player.ObjectEaten += AddFood;
@@ -63,7 +68,6 @@ namespace SlugTemplate
             //On.Player.Jump += LogSoundErrors;
             On.Player.MovementUpdate += EvilClimb;
             On.Player.UpdateBodyMode += TryClimbing;
-            On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
             
             //THIS BREAKS CARRYING & ROUGH GRABBING
             //On.Player.IsCreatureImmuneToPlayerGrabStun += RoughGrabDoesntStun;
@@ -84,30 +88,20 @@ namespace SlugTemplate
             }
         }
 
-        private void CheckIfPupPassedThroughRoom(On.Player.orig_SpitOutOfShortCut orig, Player self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
+        private void IncrementWorldTime(On.RainWorldGame.orig_Update orig, RainWorldGame self)
         {
-            try
-            {
-                if (newRoom.abstractRoom.realizedRoom != null
-                    && !self.isNPC
-                    && _roomsThatPupsEntered.Contains(newRoom.abstractRoom.name))
-                {
-                    newRoom.PlaySound(SoundID.Token_Collect);
-                    Debug.Log("[Evilslug] A pup passed through this room");
-                }
-            }
-            catch (Exception e)
-            {
-                Logger.LogError("An exception was caught and logged in CheckIfPupPassedThroughRoom");
-                Debug.LogException(e);
-            }
+            orig(self);
             
-            orig(self, pos, newRoom, spitOutAllSticks);
+            if (!self.paused)
+            {
+                _worldTime += Time.deltaTime;
+            }
         }
 
-        private int ClearPupRoomsEnteredList(On.World.orig_SpawnPupNPCs orig, World self)
+        private int ClearPupTrackingValues(On.World.orig_SpawnPupNPCs orig, World self)
         {
-            _roomsThatPupsEntered.Clear();
+            _pupRoomTimes.Clear();
+            _worldTime = 0f;
             
             return orig(self);
         }
@@ -252,7 +246,7 @@ namespace SlugTemplate
                     pupData.BeingRoughGrabbed = true;
                     //slugcat.standing = false;
                     self.Grab(slugcat, 0, PUP_CHUNK_GRAB, Creature.Grasp.Shareability.CanNotShare, 0.5f, true, true);
-
+                    
                     evilslug.FramesPickupHeld = 0;
                 }
                 else if (pupData.BeingRoughGrabbed && evilslug.FramesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
@@ -424,14 +418,11 @@ namespace SlugTemplate
         {
             try
             {
-                if (!self.dead && self.isNPC
-                    && self.abstractCreature.realizedCreature != null 
-                    && self.abstractCreature.Room.realizedRoom != null)
+                if (!self.dead
+                    && self.isNPC
+                    && !self.AI.abstractAI.isTamed)
                 {
-                    if (!_roomsThatPupsEntered.Contains(self.abstractCreature.Room.name))
-                    {
-                        _roomsThatPupsEntered.Add(self.abstractCreature.Room.name);
-                    }
+                    _pupRoomTimes[self.abstractCreature.Room.index] = _worldTime;
                 }
             }
             catch (Exception e)
@@ -460,6 +451,11 @@ namespace SlugTemplate
                         if (self.room != null)
                         {
                             self.room.PlaySound(EvilEnums.EvilSniff);
+                            if (_pupRoomTimes.TryGetValue(self.room.abstractRoom.index, out float time))
+                            {
+                                float age = _worldTime - time;
+                                PupTrailEffects(self.room, self.mainBodyChunk.pos, age);
+                            }
                         }
                     }
                     else
@@ -477,6 +473,30 @@ namespace SlugTemplate
                     self.room.PlaySound(SoundID.Token_Collect);
                     _setNotifySound = false;
                 }
+            }
+        }
+        
+        private void PupTrailEffects(Room room, Vector2 worldPos, float age)
+        {
+            float fade = Mathf.InverseLerp(_maxAge, 0, age);
+            int numSpawn = Mathf.RoundToInt(Mathf.Lerp(_minVoidSpawn, _maxVoidSpawn, fade));
+            Vector2 spawnPos;
+            
+            for (int i = numSpawn; i > 0; i--)
+            {
+                spawnPos = worldPos + Custom.RNV() * UnityEngine.Random.Range(20f, 100f);
+                
+                AbstractPhysicalObject abs = new (
+                    room.world,
+                    AbstractPhysicalObject.AbstractObjectType.VoidSpawn,
+                    null,
+                    room.GetWorldCoordinate(spawnPos),
+                    room.game.GetNewID());
+                VoidSpawn spawn = new VoidSpawn(abs, room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.VoidMelt), false);
+                spawn.fade = fade;
+                spawn.behavior = new VoidSpawn.CircleSwarm(spawn, room);
+                
+                abs.RealizeInRoom();
             }
         }
 
@@ -532,6 +552,7 @@ namespace SlugTemplate
                     && player.slugcatStats.name.value == MOD_ID
                     && pup.BeingRoughGrabbed)
                 {
+                    
                     if (EvilslugIsFriend(self))
                     {
                         pup.LosingTrust = true;
