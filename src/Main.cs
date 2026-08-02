@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using RWCustom;
 using UnityEngine;
-using Random = System.Random;
 
 namespace SlugTemplate
 {
@@ -23,7 +22,7 @@ namespace SlugTemplate
         private const int QUARTER_FOOD_AMOUNT_MUSHROOM = 2;
         private const int FOOD_AMOUNT_KARMAFLOWER = 1;
 
-        private const int MAUL_COUNTER = 20;
+        private const int ROUGH_GRAB_AND_MAUL_COUNTER = 20;
         private const int SLUG_TO_BACK_COUNTER = 10;
         private int framesPickupHeld = 0;
         private int framesSlugToBackInput = 0;
@@ -38,11 +37,13 @@ namespace SlugTemplate
         private bool _sniffing = false;
         private const float _SNIFF_DURATION = 1.5f;
         private float _sniffedFor = 0f;
+        private bool _roughGrabbing = false;
+        private bool _pupLosingTrust = false;
         
         private const float LEAVE_TRACKS_COUNTER = 10f;
         private float leaveTracksTimer = 0f;
 
-        private List<AbstractRoom> realizedShelters = new List<AbstractRoom>();
+        private List<string> _roomsThatPupsEntered = new();
 
         internal static BindingFlags bfAll = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
@@ -58,25 +59,29 @@ namespace SlugTemplate
             On.AbstractPhysicalObject.Realize += AbstractPhysicalObject_Realize;
 
             //world hooks
-            //On.AbstractRoom.RealizeRoom += SpawnPupOnShelterRealize;
-            //On.World.LoadWorld += ClearList;
+            On.World.SpawnPupNPCs += ClearPupRoomsEnteredList;
 
             //player hooks
             On.Player.ObjectEaten += AddFood;
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
             On.Player.Update += EvilPlayerUpdates;
+            On.Player.ReleaseGrasp += EndRoughGrab;
             //On.Player.Jump += LogSoundErrors;
             On.Player.MovementUpdate += EvilClimb;
             On.Player.UpdateBodyMode += TryClimbing;
-
+            On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
+            On.Player.IsCreatureImmuneToPlayerGrabStun += RoughGrabDoesntStun;
+            
             //slugnpc hooks
-            //SlugNPCAI.Update += PupUpdate;
+            SlugNPCAI.Move += PupMove;
+            SlugNPCAI.Update += PupUpdate;
+            SlugNPCAI.DecideBehavior += PupBehavior;
 
             try
             {
                 IL.Player.Update += NoPopcorn;
-
+                IL.Player.UpdateBodyMode += NegateWallslide;
             }
             catch (Exception e)
             {
@@ -84,26 +89,50 @@ namespace SlugTemplate
             }
         }
 
+        private void EndRoughGrab(On.Player.orig_ReleaseGrasp orig, Player self, int grasp)
+        {
+            _roughGrabbing = false;
+    
+            orig(self, grasp);
+        }
+
+        private void CheckIfPupPassedThroughRoom(On.Player.orig_SpitOutOfShortCut orig, Player self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
+        {
+            try
+            {
+                if (newRoom.abstractRoom.realizedRoom != null
+                    && !self.isNPC
+                    && _roomsThatPupsEntered.Contains(newRoom.abstractRoom.name))
+                {
+                    newRoom.PlaySound(SoundID.Token_Collect);
+                    Debug.Log("[Evilslug] A pup passed through this room");
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.LogError("An exception was caught and logged in CheckIfPupPassedThroughRoom");
+                Debug.LogException(e);
+            }
+            
+            orig(self, pos, newRoom, spitOutAllSticks);
+        }
+
+        private int ClearPupRoomsEnteredList(On.World.orig_SpawnPupNPCs orig, World self)
+        {
+            _roomsThatPupsEntered.Clear();
+            
+            return orig(self);
+        }
+
         private void EvilClimb(On.Player.orig_MovementUpdate orig, Player self, bool eu)
         {
             orig(self, eu);
-            
-            
 
             if (self.bodyMode == Player.BodyModeIndex.WallClimb)
             {
-                //exit climbing mode
-                if (self.input[0].jmp || (self.bodyChunks[0].contactPoint.x == 0 //suspended in air
-                                          && self.bodyChunks[1].contactPoint.x == 0
-                                          && self.bodyChunks[1].contactPoint.y == 0)
-                                      //on ground
-                                      || self.bodyChunks[0].contactPoint.y < 0)
-                {
-                    self.bodyMode = Player.BodyModeIndex.Default;
-                    return;
-                }
+                self.wallSlideCounter = 0;
                 
-                //skid to stop when grabbing wall while falling
+                //skid to stop when grabbing wall while falling/stick to walls
                 self.bodyChunks[0].vel.y = Mathf.Lerp(self.bodyChunks[0].vel.y, 0f, 0.1f);
             }
         }
@@ -111,6 +140,8 @@ namespace SlugTemplate
         private void TryClimbing(On.Player.orig_UpdateBodyMode orig, Player self)
         {
             orig(self);
+            
+            //Debug.Log("[evilslug] body mode: " + self.bodyMode);
             
             //enter climb state
             if (self.slugcatStats.name.value == MOD_ID
@@ -130,8 +161,18 @@ namespace SlugTemplate
                         && self.bodyChunks[1].ContactPoint.y == 0)
             {
                 self.bodyMode = Player.BodyModeIndex.WallClimb;
-                Debug.Log("[evilslug] changed bodymode to wallclimb!");
             }
+            
+            //exit climbing mode (already handled by game)
+            // if (self.input[0].jmp || (self.bodyChunks[0].contactPoint.x == 0 //suspended in air
+            //                           && self.bodyChunks[1].contactPoint.x == 0
+            //                           && self.bodyChunks[1].contactPoint.y == 0)
+            //                       //on ground
+            //                       || self.bodyChunks[0].contactPoint.y < 0)
+            // {
+            //     self.bodyMode = Player.BodyModeIndex.Default;
+            //     return;
+            // }
         }
 
         private void LogSoundErrors(On.Player.orig_Jump orig, Player self)
@@ -203,12 +244,12 @@ namespace SlugTemplate
         {
 
             if (self.input[0].pckp && self.grasps[0] != null && self.slugcatStats.name.value == MOD_ID
-                && self.grasps[0].grabbed is Creature
-                && !(self.grasps[0].grabbed as Creature).dead
-                && (self.grasps[0].grabbed as Creature).GetType() == typeof(Player))
+                && self.grasps[0].grabbed is Creature crit
+                && !crit.dead
+                && crit is Player slugcat)
             {
-
                 framesPickupHeld += 1;
+                
                 if (self.input[1].AnyDirectionalInput && !self.input[0].AnyDirectionalInput)
                 {
                     framesSlugToBackInput = 0;
@@ -221,23 +262,41 @@ namespace SlugTemplate
                         Logger.LogInfo("Placing pup on back");
                         self.slugOnBack.SlugToBack(self.grasps[0].grabbed as Player);
                         framesSlugToBackInput = 0;
+                        framesPickupHeld = 0;
                     }
                 }
-                else if (framesPickupHeld >= MAUL_COUNTER)
+                else if (framesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
                 {
-                    //UpdatePupAIState(self.grasps[0].grabbed as Player);
-                    (self.grasps[0].grabbed as Player).standing = false;
-                    self.Grab(self.grasps[0].grabbed, 0, PUP_CHUNK_GRAB, Creature.Grasp.Shareability.CanNotShare, 0.5f, true, true);
-                    self.MaulingUpdate(0);
+                    _roughGrabbing = true;
+                    RoughGrab(self, slugcat);
+                    framesPickupHeld = 0;
                 }
-
             }
             if (self.input[1].pckp && !self.input[0].pckp)
             {
                 framesPickupHeld = 0;
             }
-
+            
             orig(self, eu);
+        }
+
+        private void RoughGrab(Player self, Player grabbed)
+        {
+            if (_roughGrabbing)
+            {
+                grabbed.standing = false;
+                self.Grab(self.grasps[0].grabbed, 0, PUP_CHUNK_GRAB, Creature.Grasp.Shareability.CanNotShare, 0.5f, true, true);
+                
+                if (self.input[1].pckp && !self.input[0].pckp)
+                {
+                    framesPickupHeld = 0;
+                }
+                else if (framesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
+                {
+                    self.MaulingUpdate(0);
+                    framesPickupHeld = 0;
+                }
+            }
         }
 
         private void EvilSpearThrow(On.Player.orig_ThrownSpear orig, Player self, Spear spear)
@@ -301,6 +360,65 @@ namespace SlugTemplate
                 Logger.LogError(e);
             }
         }
+        
+        private void NegateWallslide(ILContext il)
+        {
+            try
+            {
+                //var c = new ILCursor(il);
+
+                Func<Instruction, bool>[] instructions =
+                {
+                    x => x.MatchLdarg(0),
+                    x => x.MatchCall<Player>(nameof(Player.input)),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdelema(typeof(Player.InputPackage)),
+                    x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
+                    x => x.MatchBrfalse(out _),
+                    
+                    x => x.MatchLdarg(0),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdarg(0),
+                    x => x.MatchCall<Player>(nameof(Player.input)),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdelema(typeof(Player.InputPackage)),
+                    x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchCall(typeof(PhysicalObject).GetMethod(nameof(PhysicalObject.IsTileSolid),
+                        new[] { typeof(int), typeof(int), typeof(int) }))
+                };
+               // Logger.LogInfo(ILDebug.IterateEntireILContext(il, instructions));
+
+                // ILLabel skipGravityBlock = c.DefineLabel();
+                //
+                // c.GotoNext(MoveType.Before,
+                //     x => x.MatchLdarg(0),
+                //     x => x.MatchCall<Player>(nameof(Player.input)),
+                //     x => x.MatchLdcI4(0),
+                //     x => x.MatchLdelema(typeof(Player.InputPackage)),
+                //     x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
+                //     x => x.MatchBrfalse(out skipGravityBlock),
+                //
+                //     x => x.MatchLdarg(0),
+                //     x => x.MatchLdcI4(0),
+                //     x => x.MatchLdarg(0),
+                //     x => x.MatchCall<Player>(nameof(Player.input)),
+                //     x => x.MatchLdcI4(0),
+                //     x => x.MatchLdelema(typeof(Player.InputPackage)),
+                //     x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
+                //     x => x.MatchLdcI4(0),
+                //     x => x.MatchCall(typeof(PhysicalObject).GetMethod(nameof(PhysicalObject.IsTileSolid), new[] { typeof(int), typeof(int), typeof(int) })));
+                // c.MoveAfterLabels();
+                // c.EmitDelegate(() =>
+                // {
+                //     Debug.Log("[evilslug] this is where wall slide gravity happens");
+                // });
+            }
+            catch (Exception e)
+            {
+                Logger.LogError(e);
+            }
+        }
 
         private void EvilPlayerUpdates(On.Player.orig_Update orig, Player self, bool eu)
         {
@@ -308,6 +426,8 @@ namespace SlugTemplate
 
             _sinceLastSniffSeconds += Time.deltaTime;
 
+            TrackRoomsPupsEntered(self);
+            
             LeaveTrack(self);
             Sniff(self);
 
@@ -316,19 +436,43 @@ namespace SlugTemplate
                 SniffUpdate(self);
             }
         }
+
+        private void TrackRoomsPupsEntered(Player self)
+        {
+            try
+            {
+                if (self.isNPC
+                    && self.abstractCreature.realizedCreature != null 
+                    && self.abstractCreature.Room.realizedRoom != null)
+                {
+                    if (!_roomsThatPupsEntered.Contains(self.abstractCreature.Room.name))
+                    {
+                        _roomsThatPupsEntered.Add(self.abstractCreature.Room.name);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.LogError("An exception was caught and logged in TrackRoomsPupsEntered");
+                Debug.LogException(e);
+            }
+        }
         
         private void LeaveTrack(Player self)
         {
             //spawn track at player location
             if (leaveTracksTimer >= LEAVE_TRACKS_COUNTER
-            && (self.isNPC || self.isSlugpup))
+            /*&& (self.isNPC || self.isSlugpup)*/)
             {
                 try
                 {
                     AbstractPhysicalObject abstractTrack = new(self.room.world, EvilEnums.PupTrack, null,
                     self.room.GetWorldCoordinate(self.bodyChunks[1].pos), self.room.game.GetNewID());
                     Pup_Track track = new Pup_Track(abstractTrack);
-                    track.SetPupColor((self.graphicsModule as PlayerGraphics).player.ShortCutColor());
+                    if (self.graphicsModule is PlayerGraphics pupGraphics)
+                    {
+                        track.SetPupColor(pupGraphics.player.ShortCutColor());
+                    }
                     track.PlaceInRoom(self.room);
                 }
                 catch (Exception ex)
@@ -405,20 +549,65 @@ namespace SlugTemplate
                 head.vel += Custom.RNV() * (UnityEngine.Random.value * 1.5f);
             }
         }
+        
+        private bool RoughGrabDoesntStun(On.Player.orig_IsCreatureImmuneToPlayerGrabStun orig, Player self, Creature grabCheck)
+        {
+            return (self.slugcatStats.name.value == MOD_ID && grabCheck is Player) ? false : orig(self, grabCheck);
+        }
+        
+        private void PupMove(SlugNPCAI.orig_Move orig, MoreSlugcats.SlugNPCAI self)
+        {
+            orig(self);
+        }
+        
+        private void PupUpdate(SlugNPCAI.orig_Update orig, MoreSlugcats.SlugNPCAI self)
+        {
+            orig(self);
 
-        // private void UpdatePupAIState(Player npc)
-        // {
-        //     npc.AI.behaviorType = EvilEnums.BeingGrabbed;
-        // }
+            if (_pupLosingTrust
+                && self.friendTracker.friend != null
+                && self.friendTracker.friend is Player slugcat
+                && slugcat.slugcatStats.name.value == MOD_ID)
+            {
+                self.cat.State.socialMemory.GetOrInitiateRelationship(slugcat.abstractCreature.ID).InfluenceTempFear(0.1f);
+            }
+        }
+        
+        private void PupBehavior(SlugNPCAI.orig_DecideBehavior orig, MoreSlugcats.SlugNPCAI self)
+        {
+            orig(self);
 
-        // private void PupUpdate(SlugNPCAI.orig_Update orig, MoreSlugcats.SlugNPCAI self)
-        // {
-        //     orig(self);
-        //
-        //     if (self.behaviorType == EvilEnums.BeingGrabbed)
-        //     {
-        //         UnityEngine.Debug.Log("[evilslug] Pup is being grabbed");
-        //     }
-        // }
+            if (self.cat.grabbedBy.Count > 0
+                && self.cat.grabbedBy[0].grabber is Player player
+                && player.slugcatStats.name.value == MOD_ID
+                && _roughGrabbing)
+            {
+                if (EvilslugIsFriend(self))
+                {
+                    _pupLosingTrust = true;
+                    
+                    //copied from slugnpc ai
+                    if (self.heldWiggle == 0 && (double) self.creature.personality.energy > 0.6000000238418579 && (double) UnityEngine.Random.value < (double) Custom.LerpMap(self.creature.personality.energy, 0.6f, 1f, 1f / 400f, 0.01f))
+                        self.heldWiggle = Mathf.RoundToInt((float) UnityEngine.Random.Range(100, 300));
+                }
+                else
+                {
+                    _pupLosingTrust = false;
+                    self.cat.State.socialMemory.GetOrInitiateRelationship(player.abstractCreature.ID).InfluenceFear(1f);
+                }
+            }
+        }
+
+        private bool EvilslugIsFriend(MoreSlugcats.SlugNPCAI pup)
+        {
+            if (pup.friendTracker.friend != null
+                && pup.friendTracker.friend is Player slugcat
+                && slugcat.slugcatStats.name.value == MOD_ID)
+            {
+                return true;
+            }
+
+            return false;
+        }
     }
 }
