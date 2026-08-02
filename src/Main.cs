@@ -95,9 +95,9 @@ namespace SlugTemplate
             }
         }
 
-        public bool CanSeeVoidSpawnHook(Func<SaveState, bool> orig, SaveState self)
+        public static bool CanSeeVoidSpawnHook(Func<SaveState, bool> orig, SaveState self)
         {
-            if (self.progression.PlayingAsSlugcat.value == MOD_ID) 
+            if (self.progression.PlayingAsSlugcat.value == MOD_ID)
             {
                 return true;
             }
@@ -543,7 +543,6 @@ namespace SlugTemplate
                 for (int i = numSpawn; i > 0; i--)
                 {
                     spawnPos = localPos + Custom.RNV() * UnityEngine.Random.Range(20f, 100f);
-                    Logger.LogInfo($"Spawned at: {spawnPos}");
 
                     AbstractPhysicalObject abs = new(
                         room.world,
