@@ -6,6 +6,7 @@ using On.MoreSlugcats;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using RWCustom;
 using UnityEngine;
 
@@ -24,8 +25,6 @@ namespace SlugTemplate
 
         private const int ROUGH_GRAB_AND_MAUL_COUNTER = 20;
         private const int SLUG_TO_BACK_COUNTER = 10;
-        private int framesPickupHeld = 0;
-        private int framesSlugToBackInput = 0;
 
         private const int PUP_CHUNK_GRAB = 0;
         
@@ -37,13 +36,10 @@ namespace SlugTemplate
         private bool _sniffing = false;
         private const float _SNIFF_DURATION = 1.5f;
         private float _sniffedFor = 0f;
-        private bool _roughGrabbing = false;
-        private bool _pupLosingTrust = false;
-        
-        private const float LEAVE_TRACKS_COUNTER = 10f;
-        private float leaveTracksTimer = 0f;
 
         private List<string> _roomsThatPupsEntered = new();
+
+        public ConditionalWeakTable<Player, EvilSlugcatData> evilPupData = new ();
 
         internal static BindingFlags bfAll = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
 
@@ -56,8 +52,6 @@ namespace SlugTemplate
             EvilEnums.RegisterValues();
             On.RainWorld.OnModsDisabled += RainWorld_OnModsDisabled;
 
-            On.AbstractPhysicalObject.Realize += AbstractPhysicalObject_Realize;
-
             //world hooks
             On.World.SpawnPupNPCs += ClearPupRoomsEnteredList;
 
@@ -66,12 +60,13 @@ namespace SlugTemplate
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
             On.Player.Update += EvilPlayerUpdates;
-            On.Player.ReleaseGrasp += EndRoughGrab;
             //On.Player.Jump += LogSoundErrors;
             On.Player.MovementUpdate += EvilClimb;
             On.Player.UpdateBodyMode += TryClimbing;
             On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
-            On.Player.IsCreatureImmuneToPlayerGrabStun += RoughGrabDoesntStun;
+            
+            //THIS BREAKS CARRYING & ROUGH GRABBING
+            //On.Player.IsCreatureImmuneToPlayerGrabStun += RoughGrabDoesntStun;
             
             //slugnpc hooks
             SlugNPCAI.Move += PupMove;
@@ -87,13 +82,6 @@ namespace SlugTemplate
             {
                 Logger.LogError(e);
             }
-        }
-
-        private void EndRoughGrab(On.Player.orig_ReleaseGrasp orig, Player self, int grasp)
-        {
-            _roughGrabbing = false;
-    
-            orig(self, grasp);
         }
 
         private void CheckIfPupPassedThroughRoom(On.Player.orig_SpitOutOfShortCut orig, Player self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
@@ -209,17 +197,6 @@ namespace SlugTemplate
                     EvilEnums.UnregisterValues();
         }
 
-        private void AbstractPhysicalObject_Realize(On.AbstractPhysicalObject.orig_Realize orig, AbstractPhysicalObject self)
-        {
-            orig(self);
-            if (self.type == EvilEnums.PupTrack)
-            {
-                UnityEngine.Debug.Log("[evilslug] Realizing track " + self.ID);
-
-                self.realizedObject = new Pup_Track(self);
-            }
-        }
-
         private void AddFood(On.Player.orig_ObjectEaten orig, Player self, IPlayerEdible edible)
         {
             if (self.slugcatStats.name.value == MOD_ID)
@@ -242,61 +219,55 @@ namespace SlugTemplate
 
         private void EvilGrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
         {
-
-            if (self.input[0].pckp && self.grasps[0] != null && self.slugcatStats.name.value == MOD_ID
-                && self.grasps[0].grabbed is Creature crit
-                && !crit.dead
-                && crit is Player slugcat)
+            EvilSlugcatData evilslug = evilPupData.GetOrCreateValue(self);
+            
+            if (self.input[0].pckp && self.grasps[0] != null &&
+            self.slugcatStats.name.value == MOD_ID
+            && self.grasps[0].grabbed is Creature crit
+            && !crit.dead
+            && crit is Player slugcat)
             {
-                framesPickupHeld += 1;
+                evilslug.FramesPickupHeld += 1;
+                EvilSlugcatData pupData = evilPupData.GetOrCreateValue(slugcat);
                 
                 if (self.input[1].AnyDirectionalInput && !self.input[0].AnyDirectionalInput)
                 {
-                    framesSlugToBackInput = 0;
+                    evilslug.FramesSlugToBackInput = 0;
                 }
                 if (self.input[0].AnyDirectionalInput)
                 {
-                    framesSlugToBackInput += 1;
-                    if (framesSlugToBackInput >= SLUG_TO_BACK_COUNTER)
+                    evilslug.FramesSlugToBackInput += 1;
+                    if (evilslug.FramesSlugToBackInput >= SLUG_TO_BACK_COUNTER)
                     {
                         Logger.LogInfo("Placing pup on back");
-                        self.slugOnBack.SlugToBack(self.grasps[0].grabbed as Player);
-                        framesSlugToBackInput = 0;
-                        framesPickupHeld = 0;
+                        pupData.BeingRoughGrabbed = false;
+                        
+                        self.slugOnBack.SlugToBack(slugcat);
+                        evilslug.FramesSlugToBackInput = 0;
+                        evilslug.FramesPickupHeld = 0;
                     }
                 }
-                else if (framesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
+                else if (evilslug.FramesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER && !pupData.BeingRoughGrabbed)
                 {
-                    _roughGrabbing = true;
-                    RoughGrab(self, slugcat);
-                    framesPickupHeld = 0;
+                    pupData.BeingRoughGrabbed = true;
+                    //slugcat.standing = false;
+                    self.Grab(slugcat, 0, PUP_CHUNK_GRAB, Creature.Grasp.Shareability.CanNotShare, 0.5f, true, true);
+
+                    evilslug.FramesPickupHeld = 0;
+                }
+                else if (pupData.BeingRoughGrabbed && evilslug.FramesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
+                {
+                    self.MaulingUpdate(0);
+                    pupData.BeingRoughGrabbed = false;
+                    evilslug.FramesPickupHeld = 0;
                 }
             }
-            if (self.input[1].pckp && !self.input[0].pckp)
+            else
             {
-                framesPickupHeld = 0;
+                evilslug.FramesPickupHeld = 0;
             }
             
             orig(self, eu);
-        }
-
-        private void RoughGrab(Player self, Player grabbed)
-        {
-            if (_roughGrabbing)
-            {
-                grabbed.standing = false;
-                self.Grab(self.grasps[0].grabbed, 0, PUP_CHUNK_GRAB, Creature.Grasp.Shareability.CanNotShare, 0.5f, true, true);
-                
-                if (self.input[1].pckp && !self.input[0].pckp)
-                {
-                    framesPickupHeld = 0;
-                }
-                else if (framesPickupHeld >= ROUGH_GRAB_AND_MAUL_COUNTER)
-                {
-                    self.MaulingUpdate(0);
-                    framesPickupHeld = 0;
-                }
-            }
         }
 
         private void EvilSpearThrow(On.Player.orig_ThrownSpear orig, Player self, Spear spear)
@@ -428,8 +399,9 @@ namespace SlugTemplate
 
             TrackRoomsPupsEntered(self);
             
-            LeaveTrack(self);
             Sniff(self);
+            
+            UpdateRoughGrabState(self);
 
             if (_sniffing)
             {
@@ -437,11 +409,22 @@ namespace SlugTemplate
             }
         }
 
+        private void UpdateRoughGrabState(Player self)
+        {
+            if (evilPupData.TryGetValue(self, out var pup))
+            {
+                if (self.grabbedBy.Count == 0)
+                {
+                    pup.BeingRoughGrabbed = false;
+                }
+            }
+        }
+
         private void TrackRoomsPupsEntered(Player self)
         {
             try
             {
-                if (self.isNPC
+                if (!self.dead && self.isNPC
                     && self.abstractCreature.realizedCreature != null 
                     && self.abstractCreature.Room.realizedRoom != null)
                 {
@@ -456,33 +439,6 @@ namespace SlugTemplate
                 Logger.LogError("An exception was caught and logged in TrackRoomsPupsEntered");
                 Debug.LogException(e);
             }
-        }
-        
-        private void LeaveTrack(Player self)
-        {
-            //spawn track at player location
-            if (leaveTracksTimer >= LEAVE_TRACKS_COUNTER
-            /*&& (self.isNPC || self.isSlugpup)*/)
-            {
-                try
-                {
-                    AbstractPhysicalObject abstractTrack = new(self.room.world, EvilEnums.PupTrack, null,
-                    self.room.GetWorldCoordinate(self.bodyChunks[1].pos), self.room.game.GetNewID());
-                    Pup_Track track = new Pup_Track(abstractTrack);
-                    if (self.graphicsModule is PlayerGraphics pupGraphics)
-                    {
-                        track.SetPupColor(pupGraphics.player.ShortCutColor());
-                    }
-                    track.PlaceInRoom(self.room);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex);
-                }
-
-                leaveTracksTimer = 0f;
-            }
-            leaveTracksTimer += Time.deltaTime;
         }
         
         private void Sniff(Player self)
@@ -504,17 +460,6 @@ namespace SlugTemplate
                         if (self.room != null)
                         {
                             self.room.PlaySound(EvilEnums.EvilSniff);
-                        }
-                        
-                        for (int i = 0; i < self.room.physicalObjects.Length; i++)
-                        {
-                            for (int j = 0; j < self.room.physicalObjects[i].Count; j++)
-                            {
-                                if (self.room.physicalObjects[i][j] is Pup_Track)
-                                {
-                                    (self.room.physicalObjects[i][j] as Pup_Track).SetVisibleTrue();
-                                }
-                            }
                         }
                     }
                     else
@@ -564,12 +509,15 @@ namespace SlugTemplate
         {
             orig(self);
 
-            if (_pupLosingTrust
-                && self.friendTracker.friend != null
-                && self.friendTracker.friend is Player slugcat
-                && slugcat.slugcatStats.name.value == MOD_ID)
+            if (evilPupData.TryGetValue(self.cat, out var pup))
             {
-                self.cat.State.socialMemory.GetOrInitiateRelationship(slugcat.abstractCreature.ID).InfluenceTempFear(0.1f);
+                if (pup.LosingTrust
+                    && self.friendTracker.friend != null
+                    && self.friendTracker.friend is Player slugcat
+                    && slugcat.slugcatStats.name.value == MOD_ID)
+                {
+                    self.cat.State.socialMemory.GetOrInitiateRelationship(slugcat.abstractCreature.ID).InfluenceTempFear(0.1f);
+                }
             }
         }
         
@@ -577,23 +525,25 @@ namespace SlugTemplate
         {
             orig(self);
 
-            if (self.cat.grabbedBy.Count > 0
-                && self.cat.grabbedBy[0].grabber is Player player
-                && player.slugcatStats.name.value == MOD_ID
-                && _roughGrabbing)
+            if (evilPupData.TryGetValue(self.cat, out var pup))
             {
-                if (EvilslugIsFriend(self))
+                if (self.cat.grabbedBy.Count > 0
+                    && self.cat.grabbedBy[0].grabber is Player player
+                    && player.slugcatStats.name.value == MOD_ID
+                    && pup.BeingRoughGrabbed)
                 {
-                    _pupLosingTrust = true;
+                    if (EvilslugIsFriend(self))
+                    {
+                        pup.LosingTrust = true;
                     
-                    //copied from slugnpc ai
-                    if (self.heldWiggle == 0 && (double) self.creature.personality.energy > 0.6000000238418579 && (double) UnityEngine.Random.value < (double) Custom.LerpMap(self.creature.personality.energy, 0.6f, 1f, 1f / 400f, 0.01f))
-                        self.heldWiggle = Mathf.RoundToInt((float) UnityEngine.Random.Range(100, 300));
-                }
-                else
-                {
-                    _pupLosingTrust = false;
-                    self.cat.State.socialMemory.GetOrInitiateRelationship(player.abstractCreature.ID).InfluenceFear(1f);
+                        //copied from slugnpc ai
+                        if (self.heldWiggle == 0 && (double) self.creature.personality.energy > 0.6000000238418579 && (double) UnityEngine.Random.value < (double) Custom.LerpMap(self.creature.personality.energy, 0.6f, 1f, 1f / 400f, 0.01f))
+                            self.heldWiggle = Mathf.RoundToInt((float) UnityEngine.Random.Range(100, 300));
+                    }
+                    else
+                    {
+                        pup.LosingTrust = false;
+                    }
                 }
             }
         }
