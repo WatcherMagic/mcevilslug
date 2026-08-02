@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using MonoMod.RuntimeDetour;
 using RWCustom;
 using UnityEngine;
 
@@ -59,9 +60,11 @@ namespace SlugTemplate
             //world hooks
             On.World.SpawnPupNPCs += ClearPupTrackingValues;
             On.RainWorldGame.Update += IncrementWorldTime;
+            On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
 
             //player hooks
             On.Player.ObjectEaten += AddFood;
+            On.Player.Grabbed += EvilDangerGrasp;
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
             On.Player.Update += EvilPlayerUpdates;
@@ -81,11 +84,46 @@ namespace SlugTemplate
             {
                 IL.Player.Update += NoPopcorn;
                 IL.Player.UpdateBodyMode += NegateWallslide;
+                
+                new Hook(
+                    typeof(SaveState).GetProperty(nameof(SaveState.CanSeeVoidSpawn)).GetGetMethod(), 
+                    typeof(Main).GetMethod(nameof(Main.CanSeeVoidSpawnHook)));
             }
             catch (Exception e)
             {
                 Logger.LogError(e);
             }
+        }
+
+        public bool CanSeeVoidSpawnHook(Func<SaveState, bool> orig, SaveState self)
+        {
+            if (self.progression.PlayingAsSlugcat.value == MOD_ID) 
+            {
+                return true;
+            }
+            return orig(self);
+        }
+
+
+        private void CheckIfPupPassedThroughRoom(On.Player.orig_SpitOutOfShortCut orig, Player self, IntVector2 pos, Room newRoom, bool spitOutAllSticks)
+        {
+            try
+            {
+                if (newRoom.abstractRoom.realizedRoom != null
+                    && !self.isNPC
+                    && _pupRoomTimes.TryGetValue(newRoom.abstractRoom.index, out var _))
+                {
+                    newRoom.PlaySound(SoundID.Token_Collect);
+                    Debug.Log("[Evilslug] A pup passed through this room");
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.LogError("An exception was caught and logged in CheckIfPupPassedThroughRoom");
+                Debug.LogException(e);
+            }
+            
+            orig(self, pos, newRoom, spitOutAllSticks);
         }
 
         private void IncrementWorldTime(On.RainWorldGame.orig_Update orig, RainWorldGame self)
@@ -209,6 +247,19 @@ namespace SlugTemplate
             }
 
             orig(self, edible);
+        }
+        
+        private void EvilDangerGrasp(On.Player.orig_Grabbed orig, Player self, Creature.Grasp grasp)
+        {
+            //noisypup compatibility for debugging purposes
+            if (grasp.grabber is Player evilslug && evilslug.slugcatStats.name.value == MOD_ID)
+            {
+                self.dangerGraspTime = 0;
+                self.dangerGrasp = grasp;
+                return;
+            }
+
+            orig(self, grasp);
         }
 
         private void EvilGrabUpdate(On.Player.orig_GrabUpdate orig, Player self, bool eu)
@@ -418,8 +469,7 @@ namespace SlugTemplate
         {
             try
             {
-                if (!self.dead
-                    && self.isNPC
+                if (self.isNPC
                     && !self.AI.abstractAI.isTamed)
                 {
                     _pupRoomTimes[self.abstractCreature.Room.index] = _worldTime;
@@ -454,6 +504,9 @@ namespace SlugTemplate
                             if (_pupRoomTimes.TryGetValue(self.room.abstractRoom.index, out float time))
                             {
                                 float age = _worldTime - time;
+                                Logger.LogInfo($"Found a scent trail in {self.room.abstractRoom.name}, age: {age} seconds");
+                                Debug.Log($"Found a scent trail in {self.room.abstractRoom.name}, age: {age} seconds");
+                                
                                 PupTrailEffects(self.room, self.mainBodyChunk.pos, age);
                             }
                         }
@@ -476,28 +529,43 @@ namespace SlugTemplate
             }
         }
         
-        private void PupTrailEffects(Room room, Vector2 worldPos, float age)
+        private void PupTrailEffects(Room room, Vector2 localPos, float age)
         {
             float fade = Mathf.InverseLerp(_maxAge, 0, age);
             int numSpawn = Mathf.RoundToInt(Mathf.Lerp(_minVoidSpawn, _maxVoidSpawn, fade));
             Vector2 spawnPos;
-            
-            for (int i = numSpawn; i > 0; i--)
+
+            Logger.LogInfo($"Void Spawn fade: {fade}");
+            Logger.LogInfo($"Number of void spawn: {numSpawn}");
+
+            try
             {
-                spawnPos = worldPos + Custom.RNV() * UnityEngine.Random.Range(20f, 100f);
-                
-                AbstractPhysicalObject abs = new (
-                    room.world,
-                    AbstractPhysicalObject.AbstractObjectType.VoidSpawn,
-                    null,
-                    room.GetWorldCoordinate(spawnPos),
-                    room.game.GetNewID());
-                VoidSpawn spawn = new VoidSpawn(abs, room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.VoidMelt), false);
-                spawn.fade = fade;
-                spawn.behavior = new VoidSpawn.CircleSwarm(spawn, room);
-                
-                abs.RealizeInRoom();
+                for (int i = numSpawn; i > 0; i--)
+                {
+                    spawnPos = localPos + Custom.RNV() * UnityEngine.Random.Range(20f, 100f);
+                    Logger.LogInfo($"Spawned at: {spawnPos}");
+
+                    AbstractPhysicalObject abs = new(
+                        room.world,
+                        AbstractPhysicalObject.AbstractObjectType.VoidSpawn,
+                        null,
+                        room.GetWorldCoordinate(spawnPos),
+                        room.game.GetNewID());
+                    VoidSpawn spawn = new VoidSpawn(abs,
+                        room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.VoidMelt), false);
+                    spawn.fade = fade;
+                    spawn.behavior = new VoidSpawn.ChasePlayer(spawn, room);
+
+                    abs.RealizeInRoom();
+                }
             }
+            catch (Exception e)
+            {
+                Logger.LogError("An exception occurred in PupTrailEffects and was logged");
+                Debug.Log("[Evilslug] An exception was logged!");
+                Debug.LogException(e);
+            }
+            
         }
 
         private void SniffUpdate(Player self)
