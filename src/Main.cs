@@ -29,11 +29,8 @@ namespace SlugTemplate
 
         private const int PUP_CHUNK_GRAB = 0;
         
-        private const float _CANT_SNIFF_SECONDS = 15f; //15 or 20
-        private float _sinceLastSniffSeconds = _CANT_SNIFF_SECONDS;
         private const float _SNIFF_HOLD_SECONDS = 1f;
         private float _sniffHeldSeconds = 0f;
-        private bool _setNotifySound = false;
         private bool _sniffing = false;
         private const float _SNIFF_DURATION = 1.5f;
         private float _sniffedFor = 0f;
@@ -60,11 +57,11 @@ namespace SlugTemplate
             //world hooks
             On.World.SpawnPupNPCs += ClearPupTrackingValues;
             On.RainWorldGame.Update += IncrementWorldTime;
-            On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
+            //On.Player.SpitOutOfShortCut += CheckIfPupPassedThroughRoom;
 
             //player hooks
             On.Player.ObjectEaten += AddFood;
-            On.Player.Grabbed += EvilDangerGrasp;
+            //On.Player.Grabbed += EvilDangerGrasp;
             On.Player.GrabUpdate += EvilGrabUpdate;
             On.Player.ThrownSpear += EvilSpearThrow;
             On.Player.Update += EvilPlayerUpdates;
@@ -251,8 +248,10 @@ namespace SlugTemplate
         
         private void EvilDangerGrasp(On.Player.orig_Grabbed orig, Player self, Creature.Grasp grasp)
         {
-            //noisypup compatibility for debugging purposes
-            if (grasp.grabber is Player evilslug && evilslug.slugcatStats.name.value == MOD_ID)
+            EvilSlugcatData pup = evilPupData.GetOrCreateValue(self);
+            
+            //attempted noisypup compatibility for debugging purposes
+            if (grasp.grabber is Player evilslug && evilslug.slugcatStats.name.value == MOD_ID && pup.BeingRoughGrabbed)
             {
                 self.dangerGraspTime = 0;
                 self.dangerGrasp = grasp;
@@ -440,8 +439,6 @@ namespace SlugTemplate
         {
             orig(self, eu);
 
-            _sinceLastSniffSeconds += Time.deltaTime;
-
             TrackRoomsPupsEntered(self);
             
             Sniff(self);
@@ -491,12 +488,10 @@ namespace SlugTemplate
                 {
                     _sniffHeldSeconds += Time.deltaTime;
                     
-                    if (_sinceLastSniffSeconds >= _CANT_SNIFF_SECONDS && _sniffHeldSeconds >= _SNIFF_HOLD_SECONDS)
+                    if (_sniffHeldSeconds >= _SNIFF_HOLD_SECONDS)
                     {
                         Debug.Log("[McEvil] Sniffing");
                         _sniffing = true;
-                        _sinceLastSniffSeconds = 0f;
-                        _setNotifySound = true;
                         self.Blink(100);
                         if (self.room != null)
                         {
@@ -520,11 +515,6 @@ namespace SlugTemplate
                 else
                 {
                     _sniffHeldSeconds = 0f;
-                }
-                if (_sinceLastSniffSeconds >= _CANT_SNIFF_SECONDS && _setNotifySound)
-                {
-                    self.room.PlaySound(SoundID.Token_Collect);
-                    _setNotifySound = false;
                 }
             }
         }
