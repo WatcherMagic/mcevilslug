@@ -28,8 +28,8 @@ namespace SlugTemplate
         private const int SLUG_TO_BACK_COUNTER = 10;
 
         private const int PUP_CHUNK_GRAB = 0;
-        
-        private const float _SNIFF_HOLD_SECONDS = 1f;
+
+        private const float _SNIFF_HOLD_SECONDS = 0.2f;
         private float _sniffHeldSeconds = 0f;
         private bool _sniffing = false;
         private const float _SNIFF_DURATION = 1.5f;
@@ -382,27 +382,127 @@ namespace SlugTemplate
             {
                 //var c = new ILCursor(il);
 
-                Func<Instruction, bool>[] instructions =
+                ExpectedIL[] instructions =
                 {
-                    x => x.MatchLdarg(0),
-                    x => x.MatchCall<Player>(nameof(Player.input)),
-                    x => x.MatchLdcI4(0),
-                    x => x.MatchLdelema(typeof(Player.InputPackage)),
-                    x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
-                    x => x.MatchBrfalse(out _),
-                    
-                    x => x.MatchLdarg(0),
-                    x => x.MatchLdcI4(0),
-                    x => x.MatchLdarg(0),
-                    x => x.MatchCall<Player>(nameof(Player.input)),
-                    x => x.MatchLdcI4(0),
-                    x => x.MatchLdelema(typeof(Player.InputPackage)),
-                    x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x)),
-                    x => x.MatchLdcI4(0),
-                    x => x.MatchCall(typeof(PhysicalObject).GetMethod(nameof(PhysicalObject.IsTileSolid),
-                        new[] { typeof(int), typeof(int), typeof(int) }))
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldarg_0,
+                            OpCodes.Ldarg_S,
+                            OpCodes.Ldarg
+                        },
+                        x => x.MatchLdarg(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Call,
+                            OpCodes.Callvirt
+                        },
+                        x => x.MatchCall<Player>(nameof(Player.input))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldc_I4_0,
+                            OpCodes.Ldc_I4_S,
+                            OpCodes.Ldc_I4
+                        },
+                        x => x.MatchLdcI4(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldelema
+                        },
+                        x => x.MatchLdelema(typeof(Player.InputPackage))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldfld
+                        },
+                        x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Brfalse,
+                            OpCodes.Brfalse_S
+                        },
+                        x => x.MatchBrfalse(out _)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldarg_0,
+                            OpCodes.Ldarg_S,
+                            OpCodes.Ldarg
+                        },
+                        x => x.MatchLdarg(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldc_I4_0,
+                            OpCodes.Ldc_I4_S,
+                            OpCodes.Ldc_I4
+                        },
+                        x => x.MatchLdcI4(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldarg_0,
+                            OpCodes.Ldarg_S,
+                            OpCodes.Ldarg
+                        },
+                        x => x.MatchLdarg(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Call,
+                            OpCodes.Callvirt
+                        },
+                        x => x.MatchCall<Player>(nameof(Player.input))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldc_I4_0,
+                            OpCodes.Ldc_I4_S,
+                            OpCodes.Ldc_I4
+                        },
+                        x => x.MatchLdcI4(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldelema
+                        },
+                        x => x.MatchLdelema(typeof(Player.InputPackage))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldfld
+                        },
+                        x => x.MatchLdfld<Player.InputPackage>(nameof(Player.InputPackage.x))),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Ldc_I4_0,
+                            OpCodes.Ldc_I4_S,
+                            OpCodes.Ldc_I4
+                        },
+                        x => x.MatchLdcI4(0)),
+                    new ExpectedIL(
+                        new HashSet<OpCode>
+                        {
+                            OpCodes.Call,
+                            OpCodes.Callvirt
+                        },
+                        x => x.MatchCall(typeof(PhysicalObject).GetMethod(nameof(PhysicalObject.IsTileSolid),
+                    new[] { typeof(int), typeof(int), typeof(int) })))
                 };
-               // Logger.LogInfo(ILDebug.IterateEntireILContext(il, instructions));
+                Logger.LogInfo(ILDebug.IterateEntireILContext(il, instructions));
+                
+                // easy copy-paste
+                // new ExpectedIL(
+                //     new HashSet<OpCode>
+                //     {
+                //             
+                //     },
+                //     )
 
                 // ILLabel skipGravityBlock = c.DefineLabel();
                 //
@@ -466,7 +566,8 @@ namespace SlugTemplate
         {
             try
             {
-                if (self.isNPC
+                if (!self.dead
+                    && self.isNPC
                     && !self.AI.abstractAI.isTamed)
                 {
                     _pupRoomTimes[self.abstractCreature.Room.index] = _worldTime;
@@ -488,10 +589,10 @@ namespace SlugTemplate
                 {
                     _sniffHeldSeconds += Time.deltaTime;
                     
-                    if (_sniffHeldSeconds >= _SNIFF_HOLD_SECONDS)
+                    if (_sniffHeldSeconds >= _SNIFF_HOLD_SECONDS && !_sniffing)
                     {
-                        Debug.Log("[McEvil] Sniffing");
                         _sniffing = true;
+                        _sniffHeldSeconds = 0;
                         self.Blink(100);
                         if (self.room != null)
                         {
@@ -543,7 +644,7 @@ namespace SlugTemplate
                     VoidSpawn spawn = new VoidSpawn(abs,
                         room.roomSettings.GetEffectAmount(RoomSettings.RoomEffect.Type.VoidMelt), false);
                     spawn.fade = fade;
-                    spawn.behavior = new VoidSpawn.ChasePlayer(spawn, room);
+                    spawn.behavior = new VoidSpawn.CircleSwarm(spawn, room);
 
                     abs.RealizeInRoom();
                 }
