@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Data.SqlTypes;
 using System.Linq;
 using System.Text;
+using Mono.Cecil;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 
@@ -45,7 +46,7 @@ public static class ILDebug
         return results.ToString();
     }
 
-    public static string IterateILFromPoint(ILCursor c, ExpectedIL[] instructions, bool discardIrrelevant)
+    public static string IterateILFromPoint(ILCursor c, ExpectedIL[] instructions, bool discardIrrelevant = true)
     {
         //array has lambdas that return if an instruction matches the expected outcome
         
@@ -75,6 +76,16 @@ public static class ILDebug
             {
                 return null;
             }
+
+            if (instructions[i].ObjectType != null)
+            {
+                //convert system.reflection type to monomod.cil.cecil typereference and compare
+                TypeReference expectedType = c.Context.Import(instructions[i].ObjectType);
+                if (!MatchesDeclaringType(current, expectedType))
+                {
+                    return null;
+                }
+            }
             
             if (!instructions[i].Predicate(current))
             {
@@ -83,15 +94,60 @@ public static class ILDebug
                 results.AppendLine($"{i} FAIL {FormatInstruction(current)}");
             
                 //print nearby instructions for debugging
-                for (int k = 0; k < 4 && start + i + k < c.Instrs.Count; k++)
-                {
-                    results.AppendLine($"{FormatInstruction(c.Instrs[start + i + k])}");
-                }
+                results.AppendLine(PrintInstructionsFromPoint(c, 4));
                 results.AppendLine();
                 break;
             }
                 
             results.AppendLine($"{i} PASS {FormatInstruction(current)}");
+
+            if (i == instructions.Length - 1)
+            {
+                results.AppendLine("FULL MATCH!");
+                results.AppendLine(PrintInstructionsFromPoint(c, 4));
+            }
+        }
+        
+        return results.ToString();
+    }
+
+    private static bool MatchesDeclaringType(Instruction instr, TypeReference expected)
+    {
+        TypeReference actual = instr.Operand switch
+        {
+            FieldReference field => field.DeclaringType,
+            MethodReference method => method.DeclaringType,
+            TypeReference type => type,
+            _ => null
+        };
+        
+        return SameType(actual, expected);
+    }
+
+    private static bool SameType(TypeReference actual, TypeReference expected)
+    {
+        return NormalizeFullNames(actual.FullName) == NormalizeFullNames(expected.FullName) && actual.Scope?.Name == expected.Scope?.Name;
+    }
+
+    private static string NormalizeFullNames(string name)
+    {
+        return name.Replace("/", "+");
+    }
+    
+    public static string PrintInstructionsFromPoint(ILCursor c, int numLines)
+    {
+        StringBuilder results = new();
+
+        for (int i = 0; i < numLines; i++)
+        {
+            results.AppendLine($"{i} {FormatInstruction(c.Next)}");
+            
+            if (c.Index >= c.Instrs.Count) //accounts for incorrect expected number of instructions
+            {
+                results.AppendLine($"{i} END OF METHOD");
+                break;
+            }
+            c.Index++;
         }
         
         return results.ToString();
