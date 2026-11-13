@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
-using Mono.Cecil;
 using Mono.Cecil.Cil;
+using OpCode = Mono.Cecil.Cil.OpCode;
 
 namespace mcevilslug;
 
