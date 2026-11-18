@@ -67,7 +67,7 @@ namespace SlugTemplate
             On.Player.Update += EvilPlayerUpdates;
             //On.Player.Jump += LogSoundErrors;
             On.Player.MovementUpdate += EvilClimb;
-            On.Player.UpdateBodyMode += TryClimbing;
+            // On.Player.UpdateBodyMode += TryClimbing;
             
             //THIS BREAKS CARRYING & ROUGH GRABBING
             //On.Player.IsCreatureImmuneToPlayerGrabStun += RoughGrabDoesntStun;
@@ -80,6 +80,7 @@ namespace SlugTemplate
             try
             {
                 IL.Player.Update += NoPopcorn;
+                IL.Player.UpdateBodyMode += BypassWallSlide;
                 
                 new Hook(
                     typeof(SaveState).GetProperty(nameof(SaveState.CanSeeVoidSpawn))!.GetGetMethod(), 
@@ -144,12 +145,15 @@ namespace SlugTemplate
         {
             orig(self, eu);
 
-            if (self.bodyMode == Player.BodyModeIndex.WallClimb)
+            if (self.slugcatStats.name.value == MOD_ID && self.bodyMode == Player.BodyModeIndex.WallClimb)
             {
-                self.wallSlideCounter = 0;
+                // self.wallSlideCounter = 0;
                 
                 //skid to stop when grabbing wall while falling/stick to walls
-                self.bodyChunks[0].vel.y = Mathf.Lerp(self.bodyChunks[0].vel.y, 0f, 0.1f);
+                // self.bodyChunks[0].vel.y = Mathf.Lerp(self.bodyChunks[0].vel.y, 0f, 0.1f);
+
+                // self.bodyChunks[0].vel.y = 0;
+                // self.bodyChunks[1].vel.y = 0;
             }
         }
         
@@ -368,6 +372,66 @@ namespace SlugTemplate
                 //Logger.LogInfo(il.ToString());
                 //UnityEngine.Debug.Log(il.ToString());
 
+            }
+            catch (Exception e)
+            {
+                Logger.LogError(e);
+            }
+        }
+        
+        private void BypassWallSlide(ILContext il)
+        {
+            try
+            {
+                var c = new ILCursor(il);
+
+                // readability qol
+                var inputGetter = typeof(Player).GetMethod("get_input");
+                var inputX = typeof(Player.InputPackage).GetField(nameof(Player.InputPackage.x));
+                var isTileSolid = typeof(PhysicalObject).GetMethod(nameof(PhysicalObject.IsTileSolid));
+
+                ILLabel skipWallSlide = null;
+                
+                c.GotoNext(MoveType.After,
+                    // if (input[0].x == 0) branch
+                    x => x.MatchLdarg(0),
+                    x => x.MatchCall(inputGetter),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdelema(typeof(Player.InputPackage)),
+                    x => x.MatchLdfld(inputX),
+                    x => x.MatchBrfalse(out skipWallSlide),
+
+                    // IsTileSolid(input[0].x, 0)
+                    x => x.MatchLdarg(0),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdarg(0),
+                    x => x.MatchCall(inputGetter),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdelema(typeof(Player.InputPackage)),
+                    x => x.MatchLdfld(inputX),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchCall(isTileSolid),
+                    x => x.MatchBrfalse(out _),
+
+                    // IsTileSolid(input[0].x, 0) with leading ldc.i4.1
+                    x => x.MatchLdarg(0),
+                    x => x.MatchLdcI4(1),
+                    x => x.MatchLdarg(0),
+                    x => x.MatchCall(inputGetter),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchLdelema(typeof(Player.InputPackage)),
+                    x => x.MatchLdfld(inputX),
+                    x => x.MatchLdcI4(0),
+                    x => x.MatchCall(isTileSolid),
+                    x => x.MatchBrfalse(out _));
+                c.MoveAfterLabels();
+                c.Emit(OpCodes.Ldarg_0);
+                c.EmitDelegate<Func<Player, bool>>(self => {
+                    bool isTarget = self.slugcatStats.name.value == MOD_ID;
+                    Logger.LogInfo($"Wall-slide hook: {self.slugcatStats.name.value}, target={isTarget}");
+                    return isTarget;
+                });
+                c.Emit(OpCodes.Brtrue, skipWallSlide);
             }
             catch (Exception e)
             {

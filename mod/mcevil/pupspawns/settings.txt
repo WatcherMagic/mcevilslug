@@ -1,0 +1,9 @@
+CAMPAIGNS;
+id: mcevilslug;
+pup_settings: {
+    pupsDynamicSpawn: true;
+    min: 3;
+    max: 8;
+    spawnChance: 1;
+};
+END_CAMPAIGNS;
